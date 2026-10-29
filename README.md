@@ -34,6 +34,14 @@ npm run dev --prefix frontend
 
 The backend requires a reachable MongoDB instance using `MONGODB_URI`. The frontend can start independently, but authenticated features require both services.
 
+If the login or registration form displays “The API is unavailable”, verify that MongoDB is running and that the backend terminal did not report a database connection failure:
+
+```bash
+curl http://localhost:4000/api/health
+```
+
+The expected response contains `"status":"ok"`. For MongoDB Atlas, replace `MONGODB_URI` in `.env` with the Atlas connection string and allow the development machine's IP address in the Atlas network access settings.
+
 Validation commands:
 
 ```bash
