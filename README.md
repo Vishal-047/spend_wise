@@ -25,6 +25,15 @@ npm run dev
 
 The API runs on `http://localhost:4000`, and the web app on `http://localhost:3000`. To seed fictional development data: `npm run seed --prefix backend` (add `"seed":"tsx src/seed.ts"` to scripts if using this command). Demo credentials are `demo@spendwise.local` / `DemoPass123!`.
 
+If you start the applications separately, use these commands in two terminals:
+
+```bash
+npm run dev --prefix backend
+npm run dev --prefix frontend
+```
+
+The backend requires a reachable MongoDB instance using `MONGODB_URI`. The frontend can start independently, but authenticated features require both services.
+
 Validation commands:
 
 ```bash
