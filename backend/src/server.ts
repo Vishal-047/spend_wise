@@ -1,0 +1,82 @@
+import express, { NextFunction, Request, Response } from 'express';
+import helmet from 'helmet';
+import cors from 'cors';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
+import jwt from 'jsonwebtoken';
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import mongoose from 'mongoose';
+import { config } from './config.js';
+import { connectDb } from './db.js';
+import { User, Category, Transaction, Budget, paymentMethods, currencyCodes } from './models.js';
+import { dateBounds, escapeCsv } from './utils.js';
+
+type AuthRequest = Request & { userId?: string };
+const app = express();
+app.use(helmet()); app.use(cors({ origin: config.FRONTEND_ORIGIN, credentials: true }));
+app.use(express.json({ limit: '100kb' })); app.use(cookieParser());
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 300, standardHeaders: true }));
+const safeUser = (u: any) => ({ id: u._id, name: u.name, email: u.email, currency: u.currency, timezone: u.timezone });
+const token = (id: string) => jwt.sign({ sub: id }, config.JWT_SECRET, { expiresIn: '2h' });
+function auth(req: AuthRequest, res: Response, next: NextFunction) {
+  try {
+    const raw = req.cookies.spendwise_token || (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : '');
+    if (!raw) return res.status(401).json({ success:false, error:'Authentication required' });
+    const decoded = jwt.verify(raw, config.JWT_SECRET) as { sub: string }; req.userId = decoded.sub; next();
+  } catch { return res.status(401).json({ success:false, error:'Invalid or expired session' }); }
+}
+const asyncRoute = (fn: any) => (req: Request, res: Response, next: NextFunction) => Promise.resolve(fn(req,res,next)).catch(next);
+const id = (value: string | string[]) => typeof value === 'string' && mongoose.isValidObjectId(value);
+const defaults = [['Salary','income'],['Allowance','income'],['Freelance','income'],['Scholarship','income'],['Gift','income'],['Other Income','income'],['Food','expense'],['Transport','expense'],['Rent','expense'],['Education','expense'],['Shopping','expense'],['Bills','expense'],['Health','expense'],['Entertainment','expense'],['Other Expense','expense']] as const;
+
+app.get('/api/health', (_req,res) => res.json({ success:true, data:{ status:'ok', service:'spendwise-api' } }));
+app.post('/api/auth/register', asyncRoute(async (req,res) => {
+  const body = z.object({ name:z.string().trim().min(2).max(80), email:z.string().email(), password:z.string().min(8).max(100), passwordConfirmation:z.string() }).refine(v=>v.password===v.passwordConfirmation,{path:['passwordConfirmation'],message:'Passwords do not match'}).parse(req.body);
+  const email=body.email.toLowerCase(); if(await User.exists({email})) return res.status(409).json({success:false,error:'Email is already registered'});
+  const user=await User.create({name:body.name,email,passwordHash:await bcrypt.hash(body.password,12)});
+  await Category.insertMany(defaults.map(([name,type])=>({owner:user._id,name,normalizedName:name.toLowerCase(),type,isDefault:true})));
+  res.cookie('spendwise_token',token(String(user._id)),{httpOnly:true,sameSite:'lax',secure:config.COOKIE_SECURE,maxAge:7200000});
+  res.status(201).json({success:true,data:{user:safeUser(user)}});
+}));
+app.post('/api/auth/login', asyncRoute(async(req,res)=>{
+  const b=z.object({email:z.string().email(),password:z.string()}).parse(req.body); const user=await User.findOne({email:b.email.toLowerCase()}).select('+passwordHash');
+  if(!user || !(await bcrypt.compare(b.password,user.passwordHash))) return res.status(401).json({success:false,error:'Invalid email or password'});
+  res.cookie('spendwise_token',token(String(user._id)),{httpOnly:true,sameSite:'lax',secure:config.COOKIE_SECURE,maxAge:7200000}); res.json({success:true,data:{user:safeUser(user)}});
+}));
+app.post('/api/auth/logout',(req,res)=>{res.clearCookie('spendwise_token');res.json({success:true,data:null})});
+app.get('/api/auth/me',auth,asyncRoute(async(req:AuthRequest,res)=>{const u=await User.findById(req.userId); if(!u)return res.status(401).json({success:false,error:'User not found'});res.json({success:true,data:{user:safeUser(u)}})}));
+app.patch('/api/users/me',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=z.object({name:z.string().min(2).max(80).optional(),currency:z.enum(currencyCodes).optional(),timezone:z.string().max(80).optional()}).strict().parse(req.body);const u=await User.findByIdAndUpdate(req.userId,b,{new:true,runValidators:true});res.json({success:true,data:{user:safeUser(u)}})}));
+app.delete('/api/users/me',auth,asyncRoute(async(req:AuthRequest,res)=>{await Promise.all([User.deleteOne({_id:req.userId}),Category.deleteMany({owner:req.userId}),Transaction.deleteMany({owner:req.userId}),Budget.deleteMany({owner:req.userId})]);res.clearCookie('spendwise_token');res.status(204).send()}));
+
+app.get('/api/categories',auth,asyncRoute(async(req:AuthRequest,res)=>res.json({success:true,data:await Category.find({owner:req.userId}).sort({type:1,name:1}).lean()})));
+app.post('/api/categories',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=z.object({name:z.string().trim().min(1).max(50),type:z.enum(['income','expense']),color:z.string().regex(/^#[0-9a-f]{6}$/i).optional()}).parse(req.body);const c=await Category.create({...b,owner:req.userId,normalizedName:b.name.toLowerCase()});res.status(201).json({success:true,data:c})}));
+app.patch('/api/categories/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const categoryId=String(req.params.id);if(!id(categoryId))return res.status(400).json({success:false,error:'Invalid id'});const b=z.object({name:z.string().trim().min(1).max(50).optional(),color:z.string().regex(/^#[0-9a-f]{6}$/i).optional(),active:z.boolean().optional()}).strict().parse(req.body);if(b.name)(b as any).normalizedName=b.name.toLowerCase();const c=await Category.findOneAndUpdate({_id:categoryId,owner:req.userId},b,{new:true,runValidators:true});if(!c)return res.status(404).json({success:false,error:'Category not found'});res.json({success:true,data:c})}));
+app.delete('/api/categories/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const categoryId=String(req.params.id);if(!id(categoryId))return res.status(400).json({success:false,error:'Invalid id'});const used=await Transaction.exists({owner:req.userId,category:categoryId});const c=await Category.findOneAndUpdate({_id:categoryId,owner:req.userId},{active:false},{new:true});if(!c)return res.status(404).json({success:false,error:'Category not found'});res.status(200).json({success:true,data:{deactivated:Boolean(used)}})}));
+
+const transactionInput=z.object({type:z.enum(['income','expense']),amountMinor:z.number().int().positive().max(100000000000),category:z.string(),description:z.string().trim().min(1).max(120),transactionDate:z.coerce.date(),paymentMethod:z.enum(paymentMethods),notes:z.string().max(500).optional()});
+async function validateCategory(owner:string, category:string, type:string){return id(category)?Category.findOne({_id:category,owner,type,active:true}):null}
+app.get('/api/transactions/export',auth,asyncRoute(async(req:AuthRequest,res)=>{const q=buildTransactionQuery(req);const rows=await Transaction.find(q).populate('category','name').sort({transactionDate:-1}).lean();const csv=[['Date','Type','AmountMinor','Currency','Category','Description','PaymentMethod','Notes'].join(','),...rows.map((r:any)=>[r.transactionDate.toISOString().slice(0,10),r.type,r.amountMinor,r.currency,r.category?.name,r.description,r.paymentMethod,r.notes].map(escapeCsv).join(','))].join('\n');res.type('text/csv').attachment('spendwise-transactions.csv').send(csv)}));
+function buildTransactionQuery(req:Request){const q=req.query as any;const out:any={owner:(req as AuthRequest).userId};if(q.type&&['income','expense'].includes(q.type))out.type=q.type;if(q.category&&id(q.category))out.category=q.category;if(q.paymentMethod&&paymentMethods.includes(q.paymentMethod))out.paymentMethod=q.paymentMethod;if(q.from||q.to)out.transactionDate={...(q.from?{$gte:new Date(q.from)}:{}),...(q.to?{$lte:new Date(q.to)}:{})};if(q.search)out.$or=[{description:new RegExp(String(q.search).slice(0,50),'i')},{notes:new RegExp(String(q.search).slice(0,50),'i')}];return out}
+app.get('/api/transactions',auth,asyncRoute(async(req:AuthRequest,res)=>{const q=req.query as any;const page=Math.max(1,Number(q.page)||1),limit=Math.min(100,Math.max(1,Number(q.limit)||20));const sort=q.sort==='amount'?'amountMinor':'transactionDate';const dir=q.order==='asc'?1:-1;const filter=buildTransactionQuery(req);const [items,total]=await Promise.all([Transaction.find(filter).populate('category','name color').sort({[sort]:dir}).skip((page-1)*limit).limit(limit).lean(),Transaction.countDocuments(filter)]);res.json({success:true,data:{items,total,page,limit,pages:Math.ceil(total/limit)}})}));
+app.post('/api/transactions',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=transactionInput.parse(req.body);const c=await validateCategory(req.userId!,b.category,b.type);if(!c)return res.status(400).json({success:false,error:'Active category does not match transaction type'});const u=await User.findById(req.userId);const t=await Transaction.create({...b,owner:req.userId,currency:u!.currency});res.status(201).json({success:true,data:t})}));
+app.patch('/api/transactions/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{if(!id(req.params.id))return res.status(400).json({success:false,error:'Invalid id'});const b=transactionInput.partial().parse(req.body);if(b.category||b.type){const old=await Transaction.findOne({_id:req.params.id,owner:req.userId});const c=await validateCategory(req.userId!,b.category||String(old?.category),b.type||old?.type||'');if(!c)return res.status(400).json({success:false,error:'Category does not match transaction type'})}const t=await Transaction.findOneAndUpdate({_id:req.params.id,owner:req.userId},b,{new:true,runValidators:true});if(!t)return res.status(404).json({success:false,error:'Transaction not found'});res.json({success:true,data:t})}));
+app.get('/api/transactions/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const t=await Transaction.findOne({_id:req.params.id,owner:req.userId}).populate('category','name color').lean();if(!t)return res.status(404).json({success:false,error:'Transaction not found'});res.json({success:true,data:t})}));
+app.delete('/api/transactions/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const r=await Transaction.deleteOne({_id:req.params.id,owner:req.userId});if(!r.deletedCount)return res.status(404).json({success:false,error:'Transaction not found'});res.status(204).send()}));
+
+async function budgetData(owner:string, b:any){const bounds=dateBounds(b.year,b.month);const filter:any={owner,type:'expense',transactionDate:{$gte:bounds.start,$lt:bounds.end}};if(b.category)filter.category=b.category;const result=await Transaction.aggregate([{$match:filter},{$group:{_id:null,total:{$sum:'$amountMinor'}}}]);return {...b,spentMinor:result[0]?.total||0,remainingMinor:b.amountMinor-(result[0]?.total||0)}}
+app.get('/api/budgets',auth,asyncRoute(async(req:AuthRequest,res)=>{const q=req.query as any;const filter:any={owner:req.userId};if(q.year)filter.year=Number(q.year);if(q.month)filter.month=Number(q.month);const bs=await Budget.find(filter).populate('category','name color').lean();res.json({success:true,data:await Promise.all(bs.map(b=>budgetData(req.userId!,b)))})}));
+app.post('/api/budgets',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=z.object({name:z.string().min(1).max(80),amountMinor:z.number().int().positive(),category:z.string().nullable().optional(),year:z.number().int(),month:z.number().int().min(1).max(12)}).parse(req.body);if(b.category){const c=await Category.findOne({_id:b.category,owner:req.userId,type:'expense',active:true});if(!c)return res.status(400).json({success:false,error:'Invalid expense category'})}const budget=await Budget.create({...b,owner:req.userId});res.status(201).json({success:true,data:await budgetData(req.userId!,budget.toObject())})}));
+app.patch('/api/budgets/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=z.object({name:z.string().min(1).max(80).optional(),amountMinor:z.number().int().positive().optional(),category:z.string().nullable().optional(),year:z.number().int().optional(),month:z.number().int().min(1).max(12).optional()}).strict().parse(req.body);const budget=await Budget.findOneAndUpdate({_id:req.params.id,owner:req.userId},b,{new:true,runValidators:true}).lean();if(!budget)return res.status(404).json({success:false,error:'Budget not found'});res.json({success:true,data:await budgetData(req.userId!,budget)})}));
+app.get('/api/budgets/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const b=await Budget.findOne({_id:req.params.id,owner:req.userId}).lean();if(!b)return res.status(404).json({success:false,error:'Budget not found'});res.json({success:true,data:await budgetData(req.userId!,b)})}));
+app.delete('/api/budgets/:id',auth,asyncRoute(async(req:AuthRequest,res)=>{const r=await Budget.deleteOne({_id:req.params.id,owner:req.userId});if(!r.deletedCount)return res.status(404).json({success:false,error:'Budget not found'});res.status(204).send()}));
+
+async function summary(req:AuthRequest){const now=new Date(), year=Number(req.query.year)||now.getFullYear(),month=Number(req.query.month)||now.getMonth()+1;const {start,end}=dateBounds(year,month);const rows=await Transaction.aggregate([{$match:{owner:new mongoose.Types.ObjectId(req.userId),transactionDate:{$gte:start,$lt:end}}},{$group:{_id:'$type',total:{$sum:'$amountMinor'}}}]);const totals={income:rows.find(r=>r._id==='income')?.total||0,expense:rows.find(r=>r._id==='expense')?.total||0};const recent=await Transaction.find({owner:req.userId,transactionDate:{$gte:start,$lt:end}}).populate('category','name color').sort({transactionDate:-1}).limit(5).lean();const budgets=await Budget.find({owner:req.userId,year,month}).lean();return {year,month,...totals,net:totals.income-totals.expense,recent,budgets:await Promise.all(budgets.map(b=>budgetData(req.userId!,b)))}}
+app.get('/api/dashboard/summary',auth,asyncRoute(async(req:AuthRequest,res)=>res.json({success:true,data:await summary(req)})));
+app.get('/api/reports/categories',auth,asyncRoute(async(req:AuthRequest,res)=>{const now=new Date(),{start,end}=dateBounds(Number(req.query.year)||now.getFullYear(),Number(req.query.month)||now.getMonth()+1);const data=await Transaction.aggregate([{$match:{owner:new mongoose.Types.ObjectId(req.userId),type:'expense',transactionDate:{$gte:start,$lt:end}}},{$group:{_id:'$category',total:{$sum:'$amountMinor'}}},{$lookup:{from:'categories',localField:'_id',foreignField:'_id',as:'category'}},{$unwind:'$category'},{$project:{_id:0,name:'$category.name',total:1,color:'$category.color'}}]);res.json({success:true,data})}));
+app.get('/api/reports/monthly',auth,asyncRoute(async(req:AuthRequest,res)=>{const data=await Transaction.aggregate([{$match:{owner:new mongoose.Types.ObjectId(req.userId)}},{$group:{_id:{year:{$year:'$transactionDate'},month:{$month:'$transactionDate'},type:'$type'},total:{$sum:'$amountMinor'}}},{$sort:{'_id.year':1,'_id.month':1}}]);res.json({success:true,data})}));
+app.get('/api/reports/cash-flow',auth,asyncRoute(async(req:AuthRequest,res)=>{const data=await Transaction.aggregate([{$match:{owner:new mongoose.Types.ObjectId(req.userId)}},{$group:{_id:{$dateToString:{format:'%Y-%m-%d',date:'$transactionDate'}},income:{$sum:{$cond:[{$eq:['$type','income']},'$amountMinor',0]}},expense:{$sum:{$cond:[{$eq:['$type','expense']},'$amountMinor',0]}}}},{$sort:{_id:1}}]);res.json({success:true,data})}));
+
+app.use((err:any,_req:Request,res:Response,_next:NextFunction)=>{if(err instanceof z.ZodError)return res.status(400).json({success:false,error:'Validation failed',details:err.flatten().fieldErrors});if(err?.code===11000)return res.status(409).json({success:false,error:'A record with these values already exists'});if(err?.name==='ValidationError'||err?.name==='CastError')return res.status(400).json({success:false,error:'Invalid data'});console.error(err);res.status(500).json({success:false,error:'Internal server error'})});
+if (process.env.NODE_ENV !== 'test') connectDb().then(()=>app.listen(config.PORT,()=>console.log(`API listening on ${config.PORT}`))).catch(err=>{console.error('Database connection failed. Start MongoDB or set MONGODB_URI.',err.message);});
+export default app;

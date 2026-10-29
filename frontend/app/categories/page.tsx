@@ -1,0 +1,1 @@
+import Link from 'next/link'; export default function Categories(){return <main className="p-10 max-w-5xl mx-auto"><Link href="/dashboard" className="text-emerald-600">← Dashboard</Link><h1 className="text-3xl font-bold my-6">Categories</h1><div className="card"><p>Default and custom categories are managed through the authenticated categories API.</p></div></main>}

@@ -1,0 +1,1 @@
+import Link from 'next/link'; export default function Settings(){return <main className="p-10 max-w-5xl mx-auto"><Link href="/dashboard" className="text-emerald-600">← Dashboard</Link><h1 className="text-3xl font-bold my-6">Settings</h1><div className="card"><p>Profile currency, timezone, account deletion, and logout are available through the profile API.</p></div></main>}
