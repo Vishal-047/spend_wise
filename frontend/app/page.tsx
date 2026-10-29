@@ -34,7 +34,16 @@ export default function Home() {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        setError(payload?.error || 'Unable to continue. Please check your details.');
+        const detail = payload?.details
+          ? Object.values(payload.details as Record<string, string[]>)
+              .flat()
+              .join(' ')
+          : '';
+        setError(
+          detail ||
+            payload?.error ||
+            'Unable to continue. Please check your details.',
+        );
         return;
       }
 
@@ -87,6 +96,7 @@ export default function Home() {
             type="password"
             placeholder="Password"
             required
+            minLength={8}
             value={form.password}
             onChange={(event) => setForm({ ...form, password: event.target.value })}
           />
@@ -96,6 +106,7 @@ export default function Home() {
               type="password"
               placeholder="Confirm password"
               required
+              minLength={8}
               value={form.passwordConfirmation}
               onChange={(event) =>
                 setForm({ ...form, passwordConfirmation: event.target.value })
