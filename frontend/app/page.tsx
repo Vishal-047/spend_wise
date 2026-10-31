@@ -63,10 +63,10 @@ export default function Home() {
   }
 
   return (
-    <main className="grid min-h-screen place-items-center p-6">
-      <section className="card w-full max-w-md">
+    <main className="grid min-h-screen place-items-center bg-gradient-to-br from-emerald-50 via-slate-50 to-white p-4 sm:p-6">
+      <section className="card w-full max-w-md p-6 sm:p-8">
         <div className="mb-8">
-          <p className="font-bold text-emerald-600">SPENDWISE</p>
+          <p className="text-sm font-bold tracking-[.18em] text-emerald-600">SPENDWISE</p>
           <h1 className="mt-2 text-3xl font-bold">Your money, clearly understood.</h1>
           <p className="mt-2 text-slate-500">
             Track income, spending and monthly budgets in one calm workspace.
@@ -76,7 +76,8 @@ export default function Home() {
         <form onSubmit={submit} className="space-y-4">
           {mode === 'register' && (
             <input
-              className="w-full rounded-lg border p-3"
+              className="input"
+              aria-label="Display name"
               placeholder="Display name"
               required
               value={form.name}
@@ -84,7 +85,8 @@ export default function Home() {
             />
           )}
           <input
-            className="w-full rounded-lg border p-3"
+            className="input"
+            aria-label="Email address"
             type="email"
             placeholder="Email"
             required
@@ -92,7 +94,8 @@ export default function Home() {
             onChange={(event) => setForm({ ...form, email: event.target.value })}
           />
           <input
-            className="w-full rounded-lg border p-3"
+            className="input"
+            aria-label="Password"
             type="password"
             placeholder="Password"
             required
@@ -102,7 +105,8 @@ export default function Home() {
           />
           {mode === 'register' && (
             <input
-              className="w-full rounded-lg border p-3"
+              className="input"
+              aria-label="Confirm password"
               type="password"
               placeholder="Confirm password"
               required
@@ -115,14 +119,14 @@ export default function Home() {
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
-            className="w-full rounded-lg bg-emerald-600 p-3 font-semibold text-white disabled:opacity-60"
+            className="btn-primary w-full"
             disabled={submitting}
           >
             {submitting ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'}
           </button>
         </form>
 
-        <button className="mt-5 text-sm text-slate-500" onClick={switchMode}>
+        <button type="button" className="mt-5 text-sm font-medium text-slate-500 hover:text-emerald-700" onClick={switchMode}>
           {mode === 'login'
             ? 'New to SpendWise? Create an account'
             : 'Already have an account? Sign in'}
