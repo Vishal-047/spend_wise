@@ -25,5 +25,20 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .btn-primary { border-radius: 10px; background: #059669; padding: .65rem 1rem; color: #fff; font-weight: 650; transition: background .15s, transform .15s; }
 .btn-primary:hover { background: #047857; }
 .btn-primary:active { transform: translateY(1px); }
-.page-shell { width: min(100% - 2rem, 80rem); margin-inline: auto; padding-block: 1.5rem 3rem; }
-@media (min-width: 768px) { .page-shell { padding-block: 2.5rem 4rem; } }
+.page-shell { width: min(100% - 2rem, 80rem); margin-inline: auto; padding-block: 1.25rem 3rem; }
+.app-nav { position: relative; z-index: 20; margin-bottom: 1.5rem; }
+.app-nav-inner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; border: 1px solid var(--line); border-radius: 1rem; background: rgb(255 255 255 / 92%); padding: .75rem 1rem; box-shadow: 0 8px 24px rgb(15 23 42 / 5%); }
+.app-nav-links { display: none; }
+.app-nav-links.is-open { position: absolute; top: 4.5rem; left: 0; right: 0; display: flex; flex-direction: column; gap: .25rem; border: 1px solid var(--line); border-radius: 1rem; background: white; padding: .75rem; box-shadow: 0 16px 35px rgb(15 23 42 / 12%); }
+.nav-menu-button { display: inline-grid; place-items: center; border: 0; border-radius: .6rem; background: transparent; padding: .55rem; color: var(--muted); }
+.nav-section-label { margin: .25rem .75rem .4rem; color: #94a3b8; font-size: .68rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.nav-link { border-radius: .65rem; padding: .7rem .75rem; color: #64748b; font-size: .9rem; font-weight: 600; transition: background .15s, color .15s; }
+.nav-link:hover { background: #f1f5f9; color: var(--ink); }
+.nav-link.is-active { background: #ecfdf5; color: #047857; }
+@media (min-width: 768px) {
+  .page-shell { width: min(calc(100% - 20rem), 80rem); margin-left: 17rem; margin-right: 3rem; padding-block: 2.5rem 4rem; }
+  .app-nav { position: fixed; inset: 0 auto 0 0; width: 15rem; margin: 0; padding: 1.5rem 1rem; background: #fff; border-right: 1px solid var(--line); }
+  .app-nav-inner { display: block; border: 0; border-radius: 0; padding: 0; box-shadow: none; background: transparent; }
+  .app-nav-links { display: flex; flex-direction: column; gap: .25rem; margin-top: 2.5rem; }
+  .nav-menu-button { display: none; }
+}
