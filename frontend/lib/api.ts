@@ -12,4 +12,11 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
 }
 
 export const money = (minor: number) => `₹${(minor / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
+export function majorToMinor(value: string): number {
+  const normalized = value.trim().replace(/,/g, '');
+  if (!/^\d+(?:\.\d{0,2})?$/.test(normalized)) return NaN;
+  const [whole, fraction = ''] = normalized.split('.');
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+}
+export const minorToMajor = (minor: number) => (minor / 100).toFixed(2);
 export const monthValue = (date = new Date()) => date.toISOString().slice(0, 7);
