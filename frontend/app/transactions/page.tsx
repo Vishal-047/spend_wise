@@ -67,8 +67,14 @@ export default function Transactions() {
           <option value="expense">Expenses</option>
           <option value="income">Income</option>
         </select>
-        <input className="input" type="date" aria-label="From date" value={filters.from} onChange={(event) => { setPage(1); setFilters({ ...filters, from: event.target.value }); }} />
-        <input className="input" type="date" aria-label="To date" value={filters.to} onChange={(event) => { setPage(1); setFilters({ ...filters, to: event.target.value }); }} />
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold text-slate-500">Start date</span>
+          <input className="input" type="date" aria-label="Start date" value={filters.from} onChange={(event) => { setPage(1); setFilters({ ...filters, from: event.target.value }); }} />
+        </label>
+        <label className="block">
+          <span className="mb-1 block text-xs font-semibold text-slate-500">End date</span>
+          <input className="input" type="date" aria-label="End date" value={filters.to} onChange={(event) => { setPage(1); setFilters({ ...filters, to: event.target.value }); }} />
+        </label>
       </div>
 
       {message && <p className="mb-3 rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
